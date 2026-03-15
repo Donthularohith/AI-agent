@@ -1,0 +1,117 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AI Agent Identity Governance Platform — Docker Compose
+# ═══════════════════════════════════════════════════════════════════════════
+# Services:
+#   1. governance-api    — FastAPI application (port 8000)
+#   2. postgres          — PostgreSQL 15 (port 5432)
+#   3. vault             — HashiCorp Vault dev mode (port 8200)
+#   4. opa               — Open Policy Agent (port 8181)
+#   5. dashboard         — Streamlit SOC dashboard (port 8501)
+#
+# Start: docker-compose up -d
+# Logs:  docker-compose logs -f governance-api
+# Stop:  docker-compose down -v
+
+services:
+  # ── PostgreSQL Database ─────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: governance-postgres
+    environment:
+      POSTGRES_DB: agent_governance
+      POSTGRES_USER: governance
+      POSTGRES_PASSWORD: governance_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U governance -d agent_governance"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── HashiCorp Vault (Dev Mode) ─────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: governance-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Open Policy Agent ──────────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:0.60.0
+    container_name: governance-opa
+    command: run --server --addr=0.0.0.0:8181 --log-level=info
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Governance API ─────────────────────────────────────────────────────
+  governance-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: governance-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://governance:governance_pass@postgres:5432/agent_governance
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: dev-root-token
+      OPA_URL: http://opa:8181
+      OPA_POLICY_PATH: /v1/data/authz
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+      API_DEBUG: "true"
+      JWT_SECRET_KEY: dev-jwt-secret-change-in-production
+      CIRCUIT_BREAKER_THRESHOLD: "5"
+      CIRCUIT_BREAKER_WINDOW_SECONDS: "60"
+      BASELINE_TRAINING_MIN_ACTIONS: "100"
+      RATE_LIMIT_REQUESTS_PER_MINUTE: "120"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── SOC Dashboard ──────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: governance-dashboard
+    environment:
+      API_URL: http://governance-api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      governance-api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local

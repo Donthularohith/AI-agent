@@ -1,0 +1,114 @@
+"""
+Database Configuration — Async SQLAlchemy Engine & Session Factory
+
+Uses SQLAlchemy 2.0 async with asyncpg for PostgreSQL.
+This is the single source of truth for database connections across the platform.
+Think of this as the "data source" config in a Splunk deployment — all queries route through here.
+"""
+
+import os
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+asyncpg://governance:governance_pass@localhost:5432/agent_governance",
+)
+
+# Create async engine — pool_size=20 handles up to 20 concurrent DB connections.
+# For 10,000 agents, each API request uses one connection briefly (async release).
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=os.getenv("API_DEBUG", "false").lower() == "true",
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,  # Verify connections are alive before use
+    pool_recycle=3600,    # Recycle connections every hour
+)
+
+# Session factory — each request gets its own session via dependency injection
+async_session_factory = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
+    pass
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency that provides a database session per request.
+    Automatically commits on success, rolls back on exception.
+
+    Usage in routers:
+        @router.post("/agents")
+        async def create_agent(db: AsyncSession = Depends(get_db)):
+            ...
+    """
+    async with async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def init_db() -> None:
+    """
+    Initialize database tables. Called during FastAPI lifespan startup.
+    In production, use Alembic migrations instead.
+    """
+    async with engine.begin() as conn:
+        from registry.models import Agent, AuditLog, AnomalyEvent  # noqa: F401
+        await conn.run_sync(Base.metadata.create_all)
+
+        # Create the append-only trigger for audit_log
+        await conn.execute(
+            __import__("sqlalchemy").text("""
+                CREATE OR REPLACE FUNCTION prevent_audit_modification()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    RAISE EXCEPTION 'Audit log is append-only. UPDATE and DELETE operations are prohibited.';
+                    RETURN NULL;
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+        )
+
+        # Check if trigger exists before creating
+        await conn.execute(
+            __import__("sqlalchemy").text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_trigger WHERE tgname = 'audit_log_immutable'
+                    ) THEN
+                        CREATE TRIGGER audit_log_immutable
+                            BEFORE UPDATE OR DELETE ON audit_log
+                            FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
+                    END IF;
+                END
+                $$;
+            """)
+        )
+
+
+async def close_db() -> None:
+    """Dispose engine connections during shutdown."""
+    await engine.dispose()

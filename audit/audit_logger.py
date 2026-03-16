@@ -81,14 +81,14 @@ class AuditLogger:
                 from registry.crud import create_audit_log
                 db_record = await create_audit_log(
                     db=db_session,
-                    agent_id=uuid.UUID(str(agent_id)),
+                    agent_id=str(agent_id),
                     action_type=action_type,
                     outcome=outcome,
                     tool_uri=tool_uri,
                     resource=resource,
                     policy_decision=policy_decision,
                     anomaly_score=anomaly_score,
-                    session_id=uuid.UUID(session_uuid) if session_uuid else None,
+                    session_id=str(session_uuid) if session_uuid else None,
                     human_owner=human_owner,
                     metadata_extra=metadata_extra,
                 )

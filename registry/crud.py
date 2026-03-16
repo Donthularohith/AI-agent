@@ -29,7 +29,7 @@ async def create_agent(db: AsyncSession, agent_data: AgentCreate) -> Agent:
     Generates a server-side UUID and sets status to ACTIVE.
     """
     agent = Agent(
-        agent_id=uuid.uuid4(),
+        agent_id=str(uuid.uuid4()),
         name=agent_data.name,
         version=agent_data.version,
         owner_email=agent_data.owner_email,
@@ -38,7 +38,7 @@ async def create_agent(db: AsyncSession, agent_data: AgentCreate) -> Agent:
         allowed_tools=agent_data.allowed_tools,
         allowed_resources=agent_data.allowed_resources,
         max_delegation_depth=agent_data.max_delegation_depth,
-        parent_agent_id=agent_data.parent_agent_id,
+        parent_agent_id=str(agent_data.parent_agent_id) if agent_data.parent_agent_id else None,
         credential_ttl_seconds=agent_data.credential_ttl_seconds,
         anomaly_threshold=agent_data.anomaly_threshold,
         compliance_tags=agent_data.compliance_tags,
@@ -53,7 +53,7 @@ async def create_agent(db: AsyncSession, agent_data: AgentCreate) -> Agent:
 async def get_agent(db: AsyncSession, agent_id: uuid.UUID) -> Optional[Agent]:
     """Retrieve an agent by ID."""
     result = await db.execute(
-        select(Agent).where(Agent.agent_id == agent_id)
+        select(Agent).where(Agent.agent_id == str(agent_id))
     )
     return result.scalar_one_or_none()
 
@@ -171,7 +171,7 @@ async def get_child_agents(
 ) -> List[Agent]:
     """Get all direct child agents of a parent."""
     result = await db.execute(
-        select(Agent).where(Agent.parent_agent_id == parent_agent_id)
+        select(Agent).where(Agent.parent_agent_id == str(parent_agent_id))
     )
     return list(result.scalars().all())
 
@@ -239,7 +239,7 @@ async def create_audit_log(
         outcome=outcome,
         policy_decision=policy_decision,
         anomaly_score=anomaly_score,
-        session_id=session_id or uuid.uuid4(),
+        session_id=str(session_id) if session_id else str(uuid.uuid4()),
         human_owner=human_owner,
         metadata_extra=metadata_extra,
     )
@@ -261,8 +261,8 @@ async def get_audit_logs(
     end_time: Optional[datetime] = None,
 ) -> Tuple[List[AuditLog], int]:
     """Query audit logs with pagination and filters."""
-    query = select(AuditLog).where(AuditLog.agent_id == agent_id)
-    count_query = select(func.count(AuditLog.id)).where(AuditLog.agent_id == agent_id)
+    query = select(AuditLog).where(AuditLog.agent_id == str(agent_id))
+    count_query = select(func.count(AuditLog.id)).where(AuditLog.agent_id == str(agent_id))
 
     if action_filter:
         query = query.where(AuditLog.action_type == action_filter)
@@ -307,7 +307,7 @@ async def get_recent_actions(
         select(AuditLog)
         .where(
             and_(
-                AuditLog.agent_id == agent_id,
+                AuditLog.agent_id == str(agent_id),
                 AuditLog.timestamp_utc >= cutoff,
             )
         )
@@ -322,7 +322,7 @@ async def count_agent_actions(
 ) -> int:
     """Count total actions for an agent — used to trigger baseline retraining."""
     result = await db.execute(
-        select(func.count(AuditLog.id)).where(AuditLog.agent_id == agent_id)
+        select(func.count(AuditLog.id)).where(AuditLog.agent_id == str(agent_id))
     )
     return result.scalar() or 0
 
@@ -341,7 +341,7 @@ async def create_anomaly_event(
 ) -> AnomalyEvent:
     """Record a new anomaly event with full feature vector."""
     event = AnomalyEvent(
-        agent_id=agent_id,
+        agent_id=str(agent_id),
         audit_log_id=audit_log_id,
         anomaly_score=anomaly_score,
         feature_vector=feature_vector,
@@ -363,7 +363,7 @@ async def get_anomaly_events(
     query = select(AnomalyEvent)
 
     if agent_id:
-        query = query.where(AnomalyEvent.agent_id == agent_id)
+        query = query.where(AnomalyEvent.agent_id == str(agent_id))
 
     if unresolved_only:
         query = query.where(AnomalyEvent.resolved == False)
@@ -383,7 +383,7 @@ async def count_anomalies_24h(
     result = await db.execute(
         select(func.count(AnomalyEvent.id)).where(
             and_(
-                AnomalyEvent.agent_id == agent_id,
+                AnomalyEvent.agent_id == str(agent_id),
                 AnomalyEvent.timestamp_utc >= cutoff,
             )
         )

@@ -9,7 +9,6 @@ POST /agents/{agent_id}/revoke — Revoke agent
 POST /agents/{agent_id}/reactivate — Reactivate suspended agent
 """
 
-import uuid
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -157,7 +156,7 @@ async def list_agents(
     summary="Get agent details",
 )
 async def get_agent(
-    agent_id: uuid.UUID,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     """Get the full record for a specific agent."""
@@ -173,7 +172,7 @@ async def get_agent(
     summary="Suspend an agent",
 )
 async def suspend_agent(
-    agent_id: uuid.UUID,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -221,7 +220,7 @@ async def suspend_agent(
     summary="Permanently revoke an agent",
 )
 async def revoke_agent(
-    agent_id: uuid.UUID,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -261,7 +260,7 @@ async def revoke_agent(
     summary="Reactivate a suspended agent",
 )
 async def reactivate_agent(
-    agent_id: uuid.UUID,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     """Reactivate a suspended agent. Cannot reactivate revoked agents."""

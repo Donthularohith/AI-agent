@@ -22,13 +22,18 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     Index,
+    JSON,
     Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
 from registry.database import Base
+
+
+def _new_uuid() -> str:
+    """Generate a new UUID as string (portable across SQLite and PostgreSQL)."""
+    return str(uuid.uuid4())
 
 
 class AgentStatus(str, enum.Enum):
@@ -50,10 +55,10 @@ class Agent(Base):
     __tablename__ = "agents"
 
     # ── Identity Fields ──────────────────────────────────────────────────
-    agent_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
         primary_key=True,
-        default=uuid.uuid4,
+        default=_new_uuid,
         comment="Unique agent identifier (server-generated UUID)",
     )
     name: Mapped[str] = mapped_column(
@@ -99,14 +104,14 @@ class Agent(Base):
     )
 
     # ── Access Control Fields ────────────────────────────────────────────
-    allowed_tools: Mapped[List[str]] = mapped_column(
-        JSONB,
+    allowed_tools: Mapped[Optional[list]] = mapped_column(
+        JSON,
         nullable=False,
         default=list,
         comment="List of MCP tool URIs this agent may call",
     )
-    allowed_resources: Mapped[List[str]] = mapped_column(
-        JSONB,
+    allowed_resources: Mapped[Optional[list]] = mapped_column(
+        JSON,
         nullable=False,
         default=list,
         comment="List of resource patterns (glob-style) this agent may access",
@@ -118,8 +123,8 @@ class Agent(Base):
         default=0,
         comment="Maximum child agent delegation depth (0 = cannot delegate)",
     )
-    parent_agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+    parent_agent_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
         ForeignKey("agents.agent_id"),
         nullable=True,
         comment="Parent agent UUID if this is a delegated child agent",
@@ -140,8 +145,8 @@ class Agent(Base):
     )
 
     # ── Compliance Fields ────────────────────────────────────────────────
-    compliance_tags: Mapped[List[str]] = mapped_column(
-        JSONB,
+    compliance_tags: Mapped[Optional[list]] = mapped_column(
+        JSON,
         nullable=False,
         default=list,
         comment="Applicable compliance frameworks: HIPAA, PCI, SOX, etc.",
@@ -151,22 +156,22 @@ class Agent(Base):
     audit_logs: Mapped[List["AuditLog"]] = relationship(
         "AuditLog",
         back_populates="agent",
-        lazy="dynamic",
+        lazy="selectin",
     )
     anomaly_events: Mapped[List["AnomalyEvent"]] = relationship(
         "AnomalyEvent",
         back_populates="agent",
-        lazy="dynamic",
+        lazy="selectin",
     )
     child_agents: Mapped[List["Agent"]] = relationship(
         "Agent",
         back_populates="parent_agent",
-        lazy="dynamic",
+        lazy="selectin",
     )
     parent_agent: Mapped[Optional["Agent"]] = relationship(
         "Agent",
         back_populates="child_agents",
-        remote_side=[agent_id],
+        remote_side="Agent.agent_id",
     )
 
     # ── Indexes ──────────────────────────────────────────────────────────
@@ -199,8 +204,8 @@ class AuditLog(Base):
         autoincrement=True,
         comment="Sequential audit record ID",
     )
-    agent_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("agents.agent_id"),
         nullable=False,
         index=True,
@@ -228,7 +233,7 @@ class AuditLog(Base):
         comment="Outcome: success, denied, error",
     )
     policy_decision: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
         comment="Full OPA policy decision payload",
     )
@@ -244,8 +249,8 @@ class AuditLog(Base):
         index=True,
         comment="UTC timestamp of the action",
     )
-    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
         nullable=True,
         comment="Session/correlation ID for tracing",
     )
@@ -255,9 +260,9 @@ class AuditLog(Base):
         comment="Human owner email at time of action",
     )
     metadata_extra: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
+        JSON,
         nullable=True,
-        comment="Additional metadata (flexible JSONB field)",
+        comment="Additional metadata (flexible JSON field)",
     )
 
     # ── Relationships ────────────────────────────────────────────────────
@@ -287,7 +292,7 @@ class AnomalyEvent(Base):
 
     Stores detailed anomaly information when an agent's behavioral score
     exceeds the threshold. Links back to the audit log entry that triggered
-    the anomaly and stores the full 12-feature vector as JSONB.
+    the anomaly and stores the full 12-feature vector as JSON.
 
     Rohith: This is your correlation event — when a Splunk alert fires, this
     record provides the full context for investigation. Each feature in the
@@ -300,8 +305,8 @@ class AnomalyEvent(Base):
         primary_key=True,
         autoincrement=True,
     )
-    agent_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("agents.agent_id"),
         nullable=False,
         index=True,
@@ -317,7 +322,7 @@ class AnomalyEvent(Base):
         comment="Isolation Forest anomaly score (negative = more anomalous)",
     )
     feature_vector: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         comment="Full 12-feature behavioral vector at time of anomaly",
     )
@@ -357,3 +362,4 @@ class AnomalyEvent(Base):
 
     def __repr__(self) -> str:
         return f"<AnomalyEvent(id={self.id}, agent={self.agent_id}, score={self.anomaly_score})>"
+

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent Governance — SOC Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <div class="logo">🛡️</div>
+    <div class="header-title"><span>AI Agent Governance</span> — SOC Dashboard</div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill" id="healthStatus"><div class="pulse-dot"></div><span>Connecting...</span></div>
+    <button class="btn-icon" onclick="refreshAll()" title="Refresh">↻</button>
+    <a href="/docs" target="_blank" class="btn-icon" title="API Docs">📄</a>
+    <span class="meta-text" id="lastRefresh"></span>
+  </div>
+</header>
+
+<nav class="tab-nav">
+  <button class="tab-btn active" onclick="switchTab('fleet',this)">📊 Agent Fleet</button>
+  <button class="tab-btn" onclick="switchTab('anomalies',this)">🚨 Anomalies <span class="tab-badge" id="anomalyBadge">0</span></button>
+  <button class="tab-btn" onclick="switchTab('audit',this)">📜 Audit Trail</button>
+  <button class="tab-btn" onclick="switchTab('blast',this)">💥 Blast Radius</button>
+  <button class="tab-btn" onclick="switchTab('policy',this)">⚡ Policy Tester</button>
+  <button class="tab-btn" onclick="switchTab('register',this)">➕ Register</button>
+</nav>
+
+<main class="main">
+  <!-- Fleet Tab -->
+  <section class="tab-content active" id="tab-fleet">
+    <div class="metrics-row" id="metricsRow">
+      <div class="kpi blue"><div class="kpi-icon">🤖</div><div class="kpi-body"><span class="kpi-val" id="kTotal">—</span><span class="kpi-label">Total Agents</span></div></div>
+      <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-body"><span class="kpi-val" id="kActive">—</span><span class="kpi-label">Active</span></div></div>
+      <div class="kpi amber"><div class="kpi-icon">⏸️</div><div class="kpi-body"><span class="kpi-val" id="kSuspended">—</span><span class="kpi-label">Suspended</span></div></div>
+      <div class="kpi red"><div class="kpi-icon">🚫</div><div class="kpi-body"><span class="kpi-val" id="kRevoked">—</span><span class="kpi-label">Revoked</span></div></div>
+      <div class="kpi purple"><div class="kpi-icon">🏥</div><div class="kpi-body"><span class="kpi-val" id="kHipaa">—</span><span class="kpi-label">HIPAA</span></div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Agent Registry</h2><button class="btn-primary" onclick="switchTab('register',document.querySelector('[onclick*=register]'))">+ Register Agent</button></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Agent</th><th>Status</th><th>Owner</th><th>Ver</th><th>Compliance</th><th>Tools</th><th>Actions</th></tr></thead>
+        <tbody id="agentTbody"><tr><td colspan="7" class="center"><div class="spinner"></div></td></tr></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Anomalies Tab -->
+  <section class="tab-content" id="tab-anomalies">
+    <div class="card"><div class="card-head"><h2>🚨 Live Anomaly Feed</h2></div>
+    <div id="anomalyFeed" class="pad"><div class="empty">✅ No anomalies detected — all agents within behavioral baseline.</div></div></div>
+  </section>
+
+  <!-- Audit Tab -->
+  <section class="tab-content" id="tab-audit">
+    <div class="card"><div class="card-head"><h2>📜 Audit Timeline</h2>
+      <select id="auditSelect" onchange="loadAudit()"><option value="">Select agent…</option></select></div>
+    <div id="auditBody" class="pad"><div class="empty">Select an agent to view audit trail.</div></div></div>
+  </section>
+
+  <!-- Blast Radius Tab -->
+  <section class="tab-content" id="tab-blast">
+    <div class="card"><div class="card-head"><h2>💥 Blast Radius Estimator</h2>
+      <select id="blastSelect" onchange="showBlast()"><option value="">Select agent…</option></select></div>
+    <div id="blastBody" class="pad"><div class="empty">Select an agent to analyze compromise impact.</div></div></div>
+  </section>
+
+  <!-- Policy Tab -->
+  <section class="tab-content" id="tab-policy">
+    <div class="card"><div class="card-head"><h2>⚡ Policy Decision Tester</h2></div>
+    <div class="pad">
+      <div class="form-row">
+        <div class="form-group"><label>Agent</label><select id="polAgent"><option value="">Select…</option></select></div>
+        <div class="form-group"><label>Tool URI</label><input id="polTool" placeholder="mcp://emr/patient/read"></div>
+      </div>
+      <div class="form-group"><label>Resource</label><input id="polResource" placeholder="emr:patients:demographics:*"></div>
+      <button class="btn-primary full" onclick="testPolicy()">⚡ Evaluate Policy Decision</button>
+      <div id="polResult"></div>
+    </div></div>
+  </section>
+
+  <!-- Register Tab -->
+  <section class="tab-content" id="tab-register">
+    <div class="card"><div class="card-head"><h2>➕ Register New Agent</h2></div>
+    <div class="pad">
+      <div class="form-row">
+        <div class="form-group"><label>Agent Name *</label><input id="regName" placeholder="emr-patient-reader"></div>
+        <div class="form-group"><label>Version *</label><input id="regVersion" placeholder="1.0.0" value="1.0.0"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Owner Email *</label><input id="regEmail" placeholder="you@company.com"></div>
+        <div class="form-group"><label>Expires In</label><select id="regExpiry"><option value="90">90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
+      </div>
+      <div class="form-group"><label>Purpose *</label><textarea id="regPurpose" rows="2" placeholder="Describe the agent's purpose (min 20 chars)"></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Allowed Tools (comma-separated MCP URIs) *</label><input id="regTools" placeholder="mcp://emr/patient/read, mcp://emr/labs/query"></div>
+        <div class="form-group"><label>Allowed Resources *</label><input id="regResources" placeholder="emr:patients:*, emr:labs:*"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Max Delegation Depth</label><input id="regDepth" type="number" value="0" min="0" max="5"></div>
+        <div class="form-group"><label>Credential TTL (sec)</label><input id="regTTL" type="number" value="900" min="60"></div>
+      </div>
+      <div class="form-group"><label>Compliance Tags</label>
+        <div class="check-row"><label><input type="checkbox" value="HIPAA" class="regTag"> HIPAA</label><label><input type="checkbox" value="PCI" class="regTag"> PCI</label><label><input type="checkbox" value="SOX" class="regTag"> SOX</label><label><input type="checkbox" value="GDPR" class="regTag"> GDPR</label></div>
+      </div>
+      <button class="btn-primary full" onclick="registerAgent()">🚀 Register Agent</button>
+      <div id="regResult"></div>
+    </div></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<footer class="footer">AI Agent Identity Governance Platform v1.0.0 — Built by <strong>Rohith Donthula</strong> — HIPAA · NIST AI RMF · EU AI Act</footer>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

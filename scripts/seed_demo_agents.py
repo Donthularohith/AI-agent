@@ -14,7 +14,7 @@ import asyncio
 import httpx
 from datetime import datetime, timezone, timedelta
 
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8080"
 
 DEMO_AGENTS = [
     {

@@ -118,16 +118,26 @@ app.include_router(policy.router, prefix="/policy", tags=["Policy Engine"])
 app.include_router(audit.router, prefix="/audit", tags=["Audit & Compliance"])
 app.include_router(health.router, tags=["Health"])
 
+# Serve dashboard static files
+import pathlib
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse, FileResponse
+
+dashboard_dir = pathlib.Path(__file__).resolve().parent.parent / "dashboard"
+if dashboard_dir.exists():
+    app.mount("/static/dashboard", StaticFiles(directory=str(dashboard_dir)), name="dashboard-static")
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard_redirect():
+    """Redirect /dashboard to the dashboard HTML."""
+    return RedirectResponse(url="/static/dashboard/index.html")
+
 
 @app.get("/", include_in_schema=False)
 async def root():
-    """Root endpoint — redirect to docs."""
-    return {
-        "platform": "AI Agent Identity Governance Platform",
-        "version": os.getenv("API_VERSION", "1.0.0"),
-        "docs": "/docs",
-        "health": "/health",
-    }
+    """Root endpoint — redirect to dashboard."""
+    return RedirectResponse(url="/static/dashboard/index.html")
 
 
 if __name__ == "__main__":

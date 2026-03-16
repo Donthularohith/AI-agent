@@ -65,7 +65,7 @@ class AgentCreate(BaseModel):
         le=5,
         description="Maximum delegation chain depth (0 = no delegation)",
     )
-    parent_agent_id: Optional[uuid.UUID] = Field(
+    parent_agent_id: Optional[str] = Field(
         default=None,
         description="Parent agent ID for delegated child agents",
     )
@@ -117,7 +117,7 @@ class AgentUpdate(BaseModel):
 
 class AgentResponse(BaseModel):
     """Response body for agent endpoints."""
-    agent_id: uuid.UUID
+    agent_id: str
     name: str
     version: str
     owner_email: str
@@ -128,7 +128,7 @@ class AgentResponse(BaseModel):
     allowed_tools: List[str]
     allowed_resources: List[str]
     max_delegation_depth: int
-    parent_agent_id: Optional[uuid.UUID] = None
+    parent_agent_id: Optional[str] = None
     credential_ttl_seconds: int
     anomaly_threshold: float
     compliance_tags: List[str]
@@ -150,17 +150,17 @@ class AgentListResponse(BaseModel):
 
 class CredentialIssueRequest(BaseModel):
     """Request to issue a new credential for an agent."""
-    agent_id: uuid.UUID = Field(..., description="Agent to issue credential for")
+    agent_id: str = Field(..., description="Agent to issue credential for")
 
 
 class CredentialRotateRequest(BaseModel):
     """Request to rotate an existing agent credential."""
-    agent_id: uuid.UUID = Field(..., description="Agent whose credential to rotate")
+    agent_id: str = Field(..., description="Agent whose credential to rotate")
 
 
 class CredentialResponse(BaseModel):
     """Credential issuance response — never contains the raw secret."""
-    agent_id: uuid.UUID
+    agent_id: str
     credential_id: str
     issued_at: datetime
     expires_at: datetime
@@ -174,13 +174,13 @@ class CredentialResponse(BaseModel):
 
 class PolicyDecisionRequest(BaseModel):
     """Input for OPA policy decision — matches Section 3.4 schema."""
-    agent_id: uuid.UUID
+    agent_id: str
     action: str = Field(..., description="Action type: tool_call, delegate, etc.")
     resource: str = Field(..., description="Resource being accessed")
     tool_uri: Optional[str] = Field(None, description="MCP tool URI being called")
     timestamp: datetime = Field(default_factory=lambda: datetime.now())
     delegation_depth: int = Field(default=0, ge=0)
-    parent_agent_id: Optional[uuid.UUID] = None
+    parent_agent_id: Optional[str] = None
     session_token_claims: Optional[dict] = None
 
 
@@ -200,7 +200,7 @@ class PolicyDecisionResponse(BaseModel):
 class AuditLogEntry(BaseModel):
     """Single audit log record."""
     id: int
-    agent_id: uuid.UUID
+    agent_id: str
     action_type: str
     tool_uri: Optional[str] = None
     resource: Optional[str] = None
@@ -208,7 +208,7 @@ class AuditLogEntry(BaseModel):
     policy_decision: Optional[dict] = None
     anomaly_score: Optional[float] = None
     timestamp_utc: datetime
-    session_id: Optional[uuid.UUID] = None
+    session_id: Optional[str] = None
     human_owner: Optional[str] = None
     metadata_extra: Optional[dict] = None
 
@@ -226,7 +226,7 @@ class AuditLogResponse(BaseModel):
 class AnomalyEventResponse(BaseModel):
     """Anomaly event record."""
     id: int
-    agent_id: uuid.UUID
+    agent_id: str
     anomaly_score: float
     feature_vector: dict
     threshold: float

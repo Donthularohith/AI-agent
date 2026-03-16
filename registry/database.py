@@ -1,12 +1,13 @@
 """
 Database Configuration — Async SQLAlchemy Engine & Session Factory
 
-Uses SQLAlchemy 2.0 async with asyncpg for PostgreSQL.
+Uses SQLAlchemy 2.0 async with asyncpg for PostgreSQL or aiosqlite for SQLite.
 This is the single source of truth for database connections across the platform.
 Think of this as the "data source" config in a Splunk deployment — all queries route through here.
 """
 
 import os
+import logging
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -18,22 +19,32 @@ from sqlalchemy.orm import DeclarativeBase
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://governance:governance_pass@localhost:5432/agent_governance",
+    "sqlite+aiosqlite:///agent_governance.db",
 )
 
-# Create async engine — pool_size=20 handles up to 20 concurrent DB connections.
-# For 10,000 agents, each API request uses one connection briefly (async release).
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=os.getenv("API_DEBUG", "false").lower() == "true",
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,  # Verify connections are alive before use
-    pool_recycle=3600,    # Recycle connections every hour
-)
+# Detect database type for conditional settings
+_is_sqlite = DATABASE_URL.startswith("sqlite")
+
+# Build engine kwargs based on database type
+_engine_kwargs = {
+    "echo": os.getenv("API_DEBUG", "false").lower() == "true",
+}
+
+if not _is_sqlite:
+    # PostgreSQL-specific connection pool settings
+    _engine_kwargs.update({
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    })
+
+# Create async engine
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 
 # Session factory — each request gets its own session via dependency injection
 async_session_factory = async_sessionmaker(
@@ -78,35 +89,39 @@ async def init_db() -> None:
         from registry.models import Agent, AuditLog, AnomalyEvent  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
 
-        # Create the append-only trigger for audit_log
-        await conn.execute(
-            __import__("sqlalchemy").text("""
-                CREATE OR REPLACE FUNCTION prevent_audit_modification()
-                RETURNS TRIGGER AS $$
-                BEGIN
-                    RAISE EXCEPTION 'Audit log is append-only. UPDATE and DELETE operations are prohibited.';
-                    RETURN NULL;
-                END;
-                $$ LANGUAGE plpgsql;
-            """)
-        )
+        # Create append-only trigger (PostgreSQL only — SQLite doesn't support triggers via SQL)
+        if not _is_sqlite:
+            from sqlalchemy import text
+            await conn.execute(
+                text("""
+                    CREATE OR REPLACE FUNCTION prevent_audit_modification()
+                    RETURNS TRIGGER AS $$
+                    BEGIN
+                        RAISE EXCEPTION 'Audit log is append-only. UPDATE and DELETE operations are prohibited.';
+                        RETURN NULL;
+                    END;
+                    $$ LANGUAGE plpgsql;
+                """)
+            )
 
-        # Check if trigger exists before creating
-        await conn.execute(
-            __import__("sqlalchemy").text("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_trigger WHERE tgname = 'audit_log_immutable'
-                    ) THEN
-                        CREATE TRIGGER audit_log_immutable
-                            BEFORE UPDATE OR DELETE ON audit_log
-                            FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
-                    END IF;
-                END
-                $$;
-            """)
-        )
+            await conn.execute(
+                text("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_trigger WHERE tgname = 'audit_log_immutable'
+                        ) THEN
+                            CREATE TRIGGER audit_log_immutable
+                                BEFORE UPDATE OR DELETE ON audit_log
+                                FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
+                        END IF;
+                    END
+                    $$;
+                """)
+            )
+            logger.info("PostgreSQL append-only audit trigger created")
+        else:
+            logger.info("SQLite mode — append-only trigger skipped (enforced in application layer)")
 
 
 async def close_db() -> None:

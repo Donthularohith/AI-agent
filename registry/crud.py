@@ -232,7 +232,7 @@ async def create_audit_log(
     This is append-only — the PostgreSQL trigger prevents modification.
     """
     log_entry = AuditLog(
-        agent_id=agent_id,
+        agent_id=str(agent_id),
         action_type=action_type,
         tool_uri=tool_uri,
         resource=resource,

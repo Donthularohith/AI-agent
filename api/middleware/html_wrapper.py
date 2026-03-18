@@ -184,24 +184,31 @@ def render_value(v):
 class HTMLWrapperMiddleware(BaseHTTPMiddleware):
     """Wraps JSON API responses in beautiful HTML when accessed from a browser."""
     
-    # Paths that should NOT be wrapped (static files, docs, dashboard)
     SKIP_PATHS = {"/docs", "/redoc", "/openapi.json", "/dashboard", "/favicon.ico"}
     SKIP_PREFIXES = ("/static/", "/docs/")
     
     async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        
         path = request.url.path
         
         # Skip non-browser or excluded paths
         if any(path.startswith(p) for p in self.SKIP_PREFIXES):
-            return response
+            return await call_next(request)
         if path in self.SKIP_PATHS:
-            return response
+            return await call_next(request)
         
         accept = request.headers.get("accept", "")
         if "text/html" not in accept:
-            return response
+            return await call_next(request)
+        
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            error_html = HTML_TEMPLATE.format(
+                title="Server Error", breadcrumb="Error", path=path,
+                content=f'<div class="stat red"><div class="stat-val">500 Error</div><div class="stat-label">{str(e)[:200]}</div></div>',
+                raw_json=json.dumps({"error": str(e)}, indent=2)
+            )
+            return HTMLResponse(content=error_html, status_code=500)
         
         # Only wrap JSON responses
         content_type = response.headers.get("content-type", "")
@@ -209,21 +216,39 @@ class HTMLWrapperMiddleware(BaseHTTPMiddleware):
             return response
         
         # Read the response body
-        body = b""
-        async for chunk in response.body_iterator:
-            body += chunk
+        try:
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk
+        except Exception:
+            return response
         
         try:
             data = json.loads(body)
-        except json.JSONDecodeError:
-            return Response(content=body, status_code=response.status_code, headers=dict(response.headers))
+        except (json.JSONDecodeError, Exception):
+            return Response(content=body, status_code=response.status_code, 
+                          headers=dict(response.headers), media_type=content_type)
+        
+        # If it's an error response, show error page
+        if response.status_code >= 400:
+            error_detail = data.get("detail", str(data)) if isinstance(data, dict) else str(data)
+            error_html = HTML_TEMPLATE.format(
+                title=f"Error {response.status_code}", breadcrumb="Error", path=path,
+                content=f'<div class="summary-row"><div class="stat red"><div class="stat-val">{response.status_code}</div><div class="stat-label">Error</div></div></div><div class="card"><div style="padding:20px;color:var(--t2)">{error_detail[:500]}</div></div>',
+                raw_json=json.dumps(data, indent=2, default=str)
+            )
+            return HTMLResponse(content=error_html, status_code=response.status_code)
         
         # Choose renderer based on path
-        if path == "/health" or path.startswith("/health"):
-            html = render_health_html(data, path)
-        elif path == "/agents" or path == "/agents/":
-            html = render_agents_html(data, path)
-        else:
+        try:
+            if path == "/health" or path.startswith("/health"):
+                html = render_health_html(data, path)
+            elif path == "/agents" or path == "/agents/":
+                html = render_agents_html(data, path)
+            else:
+                html = render_generic_html(data, path)
+        except Exception as e:
+            # Fallback: show raw JSON in styled page
             html = render_generic_html(data, path)
         
         return HTMLResponse(content=html, status_code=response.status_code)

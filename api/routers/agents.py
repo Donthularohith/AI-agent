@@ -184,27 +184,37 @@ async def suspend_agent(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    # Cascade suspension to children
-    suspended_children = await crud.cascade_suspend_children(db, agent_id)
+    # Cascade suspension to children (non-fatal)
+    suspended_children = 0
+    try:
+        suspended_children = await crud.cascade_suspend_children(db, agent_id)
+    except Exception as e:
+        logger.warning(f"Cascade suspend failed (non-fatal): {e}")
 
-    # Revoke credentials
+    # Revoke credentials (non-fatal — Vault may be offline)
     try:
         await token_manager.revoke_token(str(agent_id))
     except Exception as e:
         logger.warning(f"Failed to revoke credential during suspension: {e}")
 
-    # Reset circuit breaker
-    circuit_breaker.reset(str(agent_id))
+    # Reset circuit breaker (non-fatal)
+    try:
+        circuit_breaker.reset(str(agent_id))
+    except Exception as e:
+        logger.warning(f"Circuit breaker reset failed: {e}")
 
-    # Log suspension
-    await audit_logger.log_action(
-        agent_id=str(agent_id),
-        action_type="agent_suspended",
-        outcome="success",
-        human_owner=agent.owner_email,
-        metadata_extra={"suspended_children_count": suspended_children},
-        db_session=db,
-    )
+    # Log suspension (non-fatal — don't block suspend if audit write fails)
+    try:
+        await audit_logger.log_action(
+            agent_id=str(agent_id),
+            action_type="agent_suspended",
+            outcome="success",
+            human_owner=agent.owner_email,
+            metadata_extra={"suspended_children_count": suspended_children},
+            db_session=db,
+        )
+    except Exception as e:
+        logger.warning(f"Audit log write failed during suspend: {e}")
 
     logger.warning(
         f"Agent SUSPENDED: {agent.name} (id={agent_id}), "
@@ -231,23 +241,26 @@ async def revoke_agent(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
-    # Cascade to children
-    await crud.cascade_suspend_children(db, agent_id)
+    try:
+        await crud.cascade_suspend_children(db, agent_id)
+    except Exception as e:
+        logger.warning(f"Cascade failed during revoke: {e}")
 
-    # Revoke credentials
     try:
         await token_manager.revoke_token(str(agent_id))
     except Exception as e:
         logger.warning(f"Failed to revoke credential: {e}")
 
-    # Log revocation
-    await audit_logger.log_action(
-        agent_id=str(agent_id),
-        action_type="agent_revoked",
-        outcome="success",
-        human_owner=agent.owner_email,
-        db_session=db,
-    )
+    try:
+        await audit_logger.log_action(
+            agent_id=str(agent_id),
+            action_type="agent_revoked",
+            outcome="success",
+            human_owner=agent.owner_email,
+            db_session=db,
+        )
+    except Exception as e:
+        logger.warning(f"Audit log failed during revoke: {e}")
 
     logger.warning(f"Agent REVOKED (terminal): {agent.name} (id={agent_id})")
 
@@ -271,17 +284,21 @@ async def reactivate_agent(
             detail=f"Agent {agent_id} not found or not in suspended state",
         )
 
-    # Reset circuit breaker
-    circuit_breaker.reset(str(agent_id))
+    try:
+        circuit_breaker.reset(str(agent_id))
+    except Exception as e:
+        logger.warning(f"Circuit breaker reset failed: {e}")
 
-    # Log reactivation
-    await audit_logger.log_action(
-        agent_id=str(agent_id),
-        action_type="agent_reactivated",
-        outcome="success",
-        human_owner=agent.owner_email,
-        db_session=db,
-    )
+    try:
+        await audit_logger.log_action(
+            agent_id=str(agent_id),
+            action_type="agent_reactivated",
+            outcome="success",
+            human_owner=agent.owner_email,
+            db_session=db,
+        )
+    except Exception as e:
+        logger.warning(f"Audit log failed during reactivate: {e}")
 
     logger.info(f"Agent REACTIVATED: {agent.name} (id={agent_id})")
 

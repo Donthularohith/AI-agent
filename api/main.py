@@ -109,6 +109,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# HTML wrapper middleware — renders JSON as HTML for browser visitors
+from api.middleware.html_wrapper import HTMLWrapperMiddleware
+app.add_middleware(HTMLWrapperMiddleware)
+
 # Include routers
 from api.routers import agents, credentials, policy, audit, health
 
@@ -125,7 +129,7 @@ from fastapi.responses import RedirectResponse, FileResponse
 
 dashboard_dir = pathlib.Path(__file__).resolve().parent.parent / "dashboard"
 if dashboard_dir.exists():
-    app.mount("/static/dashboard", StaticFiles(directory=str(dashboard_dir)), name="dashboard-static")
+    app.mount("/static/dashboard", StaticFiles(directory=str(dashboard_dir), html=True), name="dashboard-static")
 
 
 @app.get("/dashboard", include_in_schema=False)

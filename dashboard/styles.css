@@ -19,6 +19,8 @@ body::before { content:''; position:fixed; inset:0; background-image:linear-grad
 .header-right { display:flex; align-items:center; gap:12px; }
 .btn-icon { background:var(--card); border:1px solid var(--border); color:var(--t2); width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; text-decoration:none; transition:all .2s; }
 .btn-icon:hover { border-color:var(--blue); color:var(--t1); }
+.nav-link { padding:5px 14px; border-radius:8px; font-size:12px; font-weight:600; text-decoration:none; border:1px solid var(--border); color:var(--t2); transition:all .2s; display:flex; align-items:center; gap:4px; }
+.nav-link:hover { border-color:var(--blue); color:var(--t1); background:rgba(59,130,246,.08); }
 .meta-text { font-size:11px; color:var(--t3); }
 
 /* Status Pill */

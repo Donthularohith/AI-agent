@@ -59,16 +59,58 @@ class Base(DeclarativeBase):
     pass
 
 
+# Track whether tables have been verified this session
+_tables_verified = False
+
+
+def _db_file_exists() -> bool:
+    """Check if the SQLite DB file physically exists (always True for PostgreSQL)."""
+    if not _is_sqlite:
+        return True
+    import re
+    match = re.search(r"sqlite.*?///(.+)", DATABASE_URL)
+    if not match:
+        return True
+    import pathlib
+    db_path = pathlib.Path(match.group(1))
+    return db_path.exists() and db_path.stat().st_size > 0
+
+
+async def _ensure_tables() -> None:
+    """Auto-create tables if they don't exist (self-healing for SQLite).
+    
+    Resets the verified cache if the DB file has been deleted so a server
+    restart is NOT required after removing agent_governance.db.
+    """
+    global _tables_verified
+    # Invalidate cache if the SQLite file was deleted
+    if _tables_verified and not _db_file_exists():
+        _tables_verified = False
+        logger.warning("SQLite DB file missing — recreating tables without restart")
+    if _tables_verified:
+        return
+    try:
+        async with engine.begin() as conn:
+            from registry.models import Agent, AuditLog, AnomalyEvent  # noqa: F401
+            await conn.run_sync(Base.metadata.create_all)
+        _tables_verified = True
+        logger.info("Database tables verified/created")
+    except Exception as e:
+        logger.error(f"Failed to ensure tables: {e}")
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency that provides a database session per request.
     Automatically commits on success, rolls back on exception.
+    Auto-creates tables if they don't exist (self-healing).
 
     Usage in routers:
         @router.post("/agents")
         async def create_agent(db: AsyncSession = Depends(get_db)):
             ...
     """
+    await _ensure_tables()
     async with async_session_factory() as session:
         try:
             yield session
